@@ -53,3 +53,4 @@ def load_data(**kwargs):
     ti = kwargs['ti']
     res_df = ti.xcom_pull(key='weather_wwo_df', task_ids=['transform_data'])[0]
     print(res_df.head())
+    print([x for x in res_df.iloc[0]])

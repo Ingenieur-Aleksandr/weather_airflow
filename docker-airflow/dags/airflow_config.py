@@ -3,6 +3,7 @@ import requests
 from airflow import DAG
 from airflow.operators.dummy_operator import DummyOperator
 from airflow.operators.python_operator import PythonOperator
+from airflow.operators.postgres_operator import PostgresOperator
 from airflow.models import Variable
 
 from etl.etl_functions import lat, lng, transform_data, load_data
@@ -48,6 +49,27 @@ with DAG('load_weather_wwo', description='load_weather_wwo', schedule_interval='
          default_args=args) as dag:  # 0 * * * *   */1 * * * *
     extract_data = PythonOperator(task_id='extract_data', python_callable=extract_data)
     transform_data = PythonOperator(task_id='transform_data', python_callable=transform_data)
-    load_data = PythonOperator(task_id='load_data', python_callable=load_data)
+    create_cloud_table = PostgresOperator(
+        task_id="create_clouds_value_table",
+        postgres_conn_id="database_PG",
+        sql="""
+                                CREATE TABLE IF NOT EXISTS clouds_value (
+                                clouds FLOAT NOT NULL,
+                                date_to TIMESTAMP NOT NULL,
+                                date_from TIMESTAMP NOT NULL,
+                                processing_date TIMESTAMP NOT NULL);
+                            """,
+    )
+    insert_in_table = PostgresOperator(
+        task_id="insert_clouds_table",
+        postgres_conn_id="database_PG",
+        sql=[f"""INSERT INTO clouds_value VALUES(
+                             {{{{ti.xcom_pull(key='weather_wwo_df', task_ids=['transform_data'])[0].iloc[{i}]['cloud_cover']}}}},
+                            '{{{{ti.xcom_pull(key='weather_wwo_df', task_ids=['transform_data'])[0].iloc[{i}]['date_to']}}}}',
+                            '{{{{ti.xcom_pull(key='weather_wwo_df', task_ids=['transform_data'])[0].iloc[{i}]['date_from']}}}}',
+                            '{{{{ti.xcom_pull(key='weather_wwo_df', task_ids=['transform_data'])[0].iloc[{i}]['processing_date']}}}}')
+                            """ for i in range(5)]
+    )
 
-    extract_data >> transform_data >> load_data
+
+    extract_data >> transform_data >> create_cloud_table >> insert_in_table
